@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "id": "movement_basics",
+  "name": "Movement Basics",
+  "description": "Flat arena with a goal zone on the right side.",
+  "seed": 1337,
+  "room": {
+    "width": 96,
+    "height": 48,
+    "origin": { "x": 256, "y": 512 },
+    "tiles": [
+      { "material": "air", "rect": [0, 0, 96, 40] },
+      { "material": "rock_static", "rect": [0, 40, 96, 48] },
+      { "material": "rock_static", "rect": [0, 0, 4, 48] },
+      { "material": "rock_static", "rect": [92, 0, 96, 48] }
+    ],
+    "spawns": {
+      "player": { "x": 12, "y": 34 },
+      "entities": [
+        {
+          "entity": "data/entities/items/pickup/goldnugget_50.xml",
+          "x": 48,
+          "y": 36,
+          "tags": ["rl_pickup"]
+        }
+      ]
+    }
+  },
+  "player": {
+    "hp": 1.0,
+    "gold": 0,
+    "inventory": [
+      { "entity": "data/entities/items/wand_level_01.xml", "spells": ["LIGHT_BULLET"] }
+    ]
+  },
+  "rewards": {
+    "per_step": -0.001,
+    "pickup_gold": 0.05,
+    "enemy_kill": 1.0,
+    "damage_taken": -0.2,
+    "goal_reached": 5.0
+  },
+  "termination": {
+    "max_steps": 1800,
+    "success_conditions": [
+      { "type": "reach_region", "rect": [70, 28, 90, 40] }
+    ]
+  }
+}

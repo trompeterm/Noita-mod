@@ -1,0 +1,48 @@
+[project]
+name = "noita-rl"
+version = "0.1.0"
+description = "Configurable Noita RL rooms, curriculum, and Gymnasium environment."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "gymnasium>=1.0",
+    "jsonschema>=4.23",
+    "numpy>=1.26",
+    "pillow>=10",
+    "pydantic>=2.14",
+    "pydantic-settings>=2.16",
+    "pywin32>=306; sys_platform == 'win32'",
+    "mss>=9.0; sys_platform == 'win32'",
+]
+
+[project.scripts]
+noita-rl = "noita_rl.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "ruff>=0.8",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/noita_rl"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "game: requires a local Noita install and launches the game",
+]
+addopts = "-m 'not game'"

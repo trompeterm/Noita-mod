@@ -1,0 +1,178 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://noita-rl.dev/schemas/scenario.schema.json",
+  "title": "Noita RL Scenario",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "seed", "room", "player", "rewards", "termination"],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$"
+    },
+    "name": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "seed": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 2147483647
+    },
+    "room": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["width", "height", "origin", "tiles", "spawns"],
+      "properties": {
+        "width": {
+          "type": "integer",
+          "minimum": 16,
+          "maximum": 256
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 16,
+          "maximum": 256
+        },
+        "origin": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["x", "y"],
+          "properties": {
+            "x": { "type": "integer" },
+            "y": { "type": "integer" }
+          }
+        },
+        "tiles": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["material", "rect"],
+            "properties": {
+              "material": { "type": "string" },
+              "rect": {
+                "type": "array",
+                "minItems": 4,
+                "maxItems": 4,
+                "items": { "type": "integer" }
+              }
+            }
+          }
+        },
+        "spawns": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["player", "entities"],
+          "properties": {
+            "player": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["x", "y"],
+              "properties": {
+                "x": { "type": "integer" },
+                "y": { "type": "integer" }
+              }
+            },
+            "entities": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["entity", "x", "y"],
+                "properties": {
+                  "entity": { "type": "string" },
+                  "x": { "type": "integer" },
+                  "y": { "type": "integer" },
+                  "tags": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "player": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hp", "gold", "inventory"],
+      "properties": {
+        "hp": { "type": "number", "exclusiveMinimum": 0 },
+        "gold": { "type": "integer", "minimum": 0 },
+        "inventory": {
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["entity"],
+            "properties": {
+              "entity": { "type": "string" },
+              "spells": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "rewards": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["per_step", "pickup_gold", "enemy_kill", "damage_taken", "goal_reached"],
+      "properties": {
+        "per_step": { "type": "number" },
+        "pickup_gold": { "type": "number" },
+        "enemy_kill": { "type": "number" },
+        "damage_taken": { "type": "number" },
+        "goal_reached": { "type": "number" }
+      }
+    },
+    "termination": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_steps", "success_conditions"],
+      "properties": {
+        "max_steps": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "success_conditions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type"],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": ["reach_region", "kill_tag", "survive_steps", "collect_gold"]
+              },
+              "rect": {
+                "type": "array",
+                "minItems": 4,
+                "maxItems": 4,
+                "items": { "type": "integer" }
+              },
+              "tag": { "type": "string" },
+              "count": { "type": "integer", "minimum": 1 },
+              "steps": { "type": "integer", "minimum": 1 },
+              "gold": { "type": "integer", "minimum": 0 }
+            }
+          }
+        }
+      }
+    }
+  }
+}

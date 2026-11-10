@@ -1,0 +1,12 @@
+<Mod
+	name="Noita RL"
+	description="Configurable training arenas and RL telemetry for Noita agents."
+	ui_newgame_name="Noita RL"
+	ui_newgame_description="Load compiled RL scenarios and stream training telemetry."
+	ui_newgame_gfx_banner_bg="mods/noita_rl/files/menu_banner_background.png"
+	ui_newgame_gfx_banner_fg="mods/noita_rl/files/menu_banner_overlay.png"
+	request_no_api_restrictions="0"
+	is_game_mode="1"
+	game_mode_supports_save_slots="0"
+>
+</Mod>

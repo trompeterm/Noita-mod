@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "id": "combat_arena",
+  "name": "Combat Arena",
+  "description": "Small combat room with a weak enemy and reward for kills.",
+  "seed": 4242,
+  "room": {
+    "width": 96,
+    "height": 48,
+    "origin": { "x": 512, "y": 512 },
+    "tiles": [
+      { "material": "air", "rect": [0, 0, 96, 40] },
+      { "material": "rock_static", "rect": [0, 40, 96, 48] },
+      { "material": "rock_static", "rect": [0, 0, 4, 48] },
+      { "material": "rock_static", "rect": [92, 0, 96, 48] }
+    ],
+    "spawns": {
+      "player": { "x": 16, "y": 34 },
+      "entities": [
+        {
+          "entity": "data/entities/animals/slime.xml",
+          "x": 70,
+          "y": 36,
+          "tags": ["enemy", "rl_target"]
+        }
+      ]
+    }
+  },
+  "player": {
+    "hp": 1.25,
+    "gold": 0,
+    "inventory": [
+      {
+        "entity": "data/entities/items/wand_level_02.xml",
+        "spells": ["LIGHT_BULLET", "LIGHT_BULLET", "SPITTER"]
+      }
+    ]
+  },
+  "rewards": {
+    "per_step": -0.002,
+    "pickup_gold": 0.05,
+    "enemy_kill": 2.0,
+    "damage_taken": -0.5,
+    "goal_reached": 3.0
+  },
+  "termination": {
+    "max_steps": 2400,
+    "success_conditions": [
+      { "type": "kill_tag", "tag": "enemy", "count": 1 }
+    ]
+  }
+}

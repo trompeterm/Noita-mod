@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "id": "starter",
+  "name": "Starter Curriculum",
+  "description": "Move from navigation to combat after a stable success rate.",
+  "stages": [
+    {
+      "id": "movement",
+      "name": "Movement",
+      "scenarios": [
+        { "scenario": "movement_basics", "weight": 1.0 }
+      ],
+      "advance": { "window": 10, "min_success_rate": 0.6 },
+      "regress": { "window": 10, "max_success_rate": 0.2 }
+    },
+    {
+      "id": "combat",
+      "name": "Combat",
+      "scenarios": [
+        { "scenario": "combat_arena", "weight": 1.0 }
+      ],
+      "advance": { "window": 10, "min_success_rate": 0.7 },
+      "regress": { "window": 10, "max_success_rate": 0.25 }
+    }
+  ]
+}
