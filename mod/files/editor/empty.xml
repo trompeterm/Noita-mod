@@ -1,0 +1,19 @@
+<Biome>
+	<!-- Modelled on vanilla data/biome/boss_arena_top.xml: an open-air biome with no
+	     wang template and no materials, so world generation produces only air. -->
+	<Topology
+		name="Room Editor"
+		background_image="data/weather_gfx/background_cave_02.png"
+		background_use_neighbor="0"
+		wang_template_file=""
+		lua_script="mods/noita_rl/files/editor/empty.lua"
+		wang_map_width="256"
+		wang_map_height="256"
+		limit_background_image="0"
+		pixel_scene="0"
+		noise_biome_edges="0"
+		audio_ambience="temple">
+	</Topology>
+
+	<Materials />
+</Biome>

@@ -7,6 +7,7 @@ MATERIAL_COLORS: dict[str, tuple[int, int, int]] = {
     "air": (0, 0, 0),
     "rock_static_glow": (64, 64, 64),
     "rock_static": (48, 48, 48),
+    "steel_static": (90, 90, 104),
     "wood_static": (120, 72, 24),
     "snow_static": (220, 220, 255),
     "lava": (255, 96, 16),

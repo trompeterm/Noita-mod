@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "id": "my_curriculum",
+  "name": "My Curriculum",
+  "description": "Rooms from the in-game editor, easiest first. Add a stage per new skill.",
+  "stages": [
+    {
+      "id": "reach_goal",
+      "name": "Walk to the goal",
+      "scenarios": [
+        { "scenario": "lesson_01", "weight": 1.0 }
+      ],
+      "advance": { "window": 10, "min_success_rate": 0.7 },
+      "regress": { "window": 10, "max_success_rate": 0.2 }
+    },
+    {
+      "id": "combat",
+      "name": "Kill an enemy",
+      "scenarios": [
+        { "scenario": "combat_arena", "weight": 1.0 }
+      ],
+      "advance": { "window": 10, "min_success_rate": 0.7 },
+      "regress": { "window": 10, "max_success_rate": 0.25 }
+    }
+  ]
+}

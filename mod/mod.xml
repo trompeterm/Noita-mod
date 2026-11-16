@@ -1,8 +1,8 @@
 <Mod
-	name="Noita RL"
-	description="Configurable training arenas and RL telemetry for Noita agents."
-	ui_newgame_name="Noita RL"
-	ui_newgame_description="Load compiled RL scenarios and stream training telemetry."
+	name="Noita Room Editor"
+	description="Visual room editor with an empty world, material painting, spawn tools, saved blueprints and play testing."
+	ui_newgame_name="Room Editor"
+	ui_newgame_description="Build and test custom rooms visually in an isolated world."
 	ui_newgame_gfx_banner_bg="mods/noita_rl/files/menu_banner_background.png"
 	ui_newgame_gfx_banner_fg="mods/noita_rl/files/menu_banner_overlay.png"
 	request_no_api_restrictions="0"

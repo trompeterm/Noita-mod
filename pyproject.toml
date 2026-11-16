@@ -20,6 +20,7 @@ noita-rl = "noita_rl.cli:main"
 
 [dependency-groups]
 dev = [
+    "lupa>=2.8",
     "pytest>=8",
     "ruff>=0.8",
 ]
