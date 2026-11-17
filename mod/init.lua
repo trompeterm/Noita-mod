@@ -20,34 +20,9 @@ ModTextFileSetContent("data/biome/_pixel_scenes_newgame_plus.xml", NO_PIXEL_SCEN
 ModSettingSet("noita_rl.debug_stage", "init")
 ModSettingSet("noita_rl.debug_trace", "init")
 
--- "agent" runs the compiled active scenario with telemetry for the Python env;
--- "editor" (default) opens the visual room editor.
-if ModSettingGet("noita_rl.mode") == "agent" then
-	dofile_once("mods/noita_rl/files/scripts/constants.lua")
-	dofile_once("mods/noita_rl/files/scripts/runtime.lua")
-
-	function OnMagicNumbersAndWorldSeedInitialized()
-		noita_rl_bootstrap_seed()
-	end
-
-	function OnWorldInitialized()
-		noita_rl_on_world_initialized()
-	end
-
-	function OnPlayerSpawned(player_entity)
-		noita_rl_on_player_spawned(player_entity)
-	end
-
-	function OnWorldPostUpdate()
-		noita_rl_on_world_post_update()
-	end
-
-	function OnPlayerDied(player_entity)
-		noita_rl_on_player_died(player_entity)
-	end
-	return
-end
-
+-- All modes run in editor.lua: "editor" (default) opens the visual room editor, "human"
+-- plays the course chosen in Mod settings, and "agent" plays it for the Python env with
+-- the telemetry strip and sensors (files/agent/agent.lua).
 dofile_once("mods/noita_rl/files/editor/editor.lua")
 
 function OnMagicNumbersAndWorldSeedInitialized()

@@ -141,6 +141,8 @@ end
 -- Courses: exported rooms laid out left to right in the world, played in order.
 M.room_spacing = 512 -- world pixels between room origins (room is 256 wide)
 M.max_course = 12
+-- Saved courses live in numbered slots (noita_rl.course_slot_<n>); settings.lua lists them.
+M.course_slots = 9
 
 function M.room_origin(position)
     return (position - 1) * M.room_spacing, 0
@@ -250,7 +252,7 @@ local function tile_rects(room)
     return tiles
 end
 
-local REWARDS = {
+M.rewards = {
     reach_goal = {per_step = -0.001, pickup_gold = 0.0, enemy_kill = 0.0, damage_taken = -0.2, goal_reached = 5.0},
     kill_all = {per_step = -0.001, pickup_gold = 0.0, enemy_kill = 1.0, damage_taken = -0.2, goal_reached = 3.0},
     collect_gold = {per_step = -0.001, pickup_gold = 0.02, enemy_kill = 0.0, damage_taken = -0.2, goal_reached = 3.0},
@@ -286,7 +288,7 @@ function M.to_scenario(room)
         player = {hp = 4, gold = 0, inventory = {
             {entity = "data/entities/items/wand_level_01.xml", spells = {"LIGHT_BULLET"}},
         }},
-        rewards = REWARDS[objective.id],
+        rewards = M.rewards[objective.id],
         termination = {max_steps = M.max_steps(room), success_conditions = M.success_conditions(room)},
     }
 end

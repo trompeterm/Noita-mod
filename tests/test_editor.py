@@ -1,4 +1,5 @@
 """Exercise the actual Lua 5.1 editor with a small, explicit game API harness."""
+import argparse
 import json
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -533,3 +534,115 @@ def test_old_exports_recover_their_blueprint_from_a_matching_slot(game):
     assert game.eval('settings["noita_rl.room_lesson_03"]') is None
     game.execute("buttons[62] = true; noita_editor_update()")  # add the recovered room
     assert game.eval('settings["noita_rl.course"]') == "lesson_01"
+
+
+def export_two_lessons(game):
+    game.execute('''
+        boot()
+        buttons[53] = true; noita_editor_update() -- id lesson_01
+        buttons[8] = true; noita_editor_update()  -- export
+        buttons[53] = true; noita_editor_update() -- id lesson_02
+        buttons[8] = true; noita_editor_update()
+    ''')
+
+
+def test_course_slots_save_load_and_clear(game):
+    export_two_lessons(game)
+    game.execute('''
+        buttons[62] = true; noita_editor_update() -- add lesson_01
+        buttons[61] = true; noita_editor_update()
+        buttons[62] = true; noita_editor_update() -- add lesson_02
+        buttons[66] = true; noita_editor_update() -- course slot 2
+        buttons[67] = true; noita_editor_update() -- save course
+    ''')
+    assert game.eval('settings["noita_rl.course_slot_2"]') == "lesson_01,lesson_02"
+    assert "course slot 2" in editor_message(game)
+    game.execute("buttons[65] = true; noita_editor_update()")  # clear
+    assert game.eval('settings["noita_rl.course"]') == ""
+    game.execute("buttons[67] = true; noita_editor_update()")  # saving an empty course is refused
+    assert game.eval('settings["noita_rl.course_slot_2"]') == "lesson_01,lesson_02"
+    game.execute("buttons[68] = true; noita_editor_update()")  # load slot 2
+    assert game.eval('settings["noita_rl.course"]') == "lesson_01,lesson_02"
+    game.execute("buttons[66] = true; buttons[68] = true; noita_editor_update()")  # slot 3 is empty
+    assert "slot 3 is empty" in editor_message(game)
+
+
+def test_human_mode_plays_the_chosen_course_and_loops(game):
+    export_two_lessons(game)
+    game.execute('''
+        settings["noita_rl.course_slot_4"] = "lesson_02,lesson_01"
+        settings["noita_rl.play_course"] = "4"
+        settings["noita_rl.mode"] = "human"
+    ''')
+    # A new game: reload the editor with the human-mode settings in place.
+    game.execute((EDITOR / "editor.lua").read_text())
+    game.execute("frame = 100; boot(); noita_editor_update()")
+    assert game.eval("px") == 28  # room 1 of the course (lesson_02) at origin 0
+    game.execute("frame = 110; px, py = 230, 130; noita_editor_update()")
+    assert game.eval("px") == 512 + 28  # room 2
+    game.execute("frame = 120; px, py = 512 + 230, 130; noita_editor_update()")
+    assert game.eval("px") == 28  # course complete: starts again instead of opening the editor
+    game.execute("buttons[10] = true; noita_editor_update()")  # Restart course
+    assert game.eval("px") == 28
+
+
+def test_human_mode_explains_an_empty_course(game):
+    game.execute('settings["noita_rl.mode"] = "human"; settings["noita_rl.play_course"] = "7"; boot()')
+    message = editor_message(game)
+    assert "Can't start course 7" in message and "empty" in message
+
+
+def test_mod_settings_course_picker_skips_empty_slots(lua):
+    lua.execute('''
+        settings, next_values, clicks = {}, {}, {}
+        function dofile() end
+        function ModSettingGet(key) return settings[key] end
+        function ModSettingSet(key, value) settings[key] = value end
+        function ModSettingGetNextValue(key) return next_values[key] end
+        function ModSettingSetNextValue(key, value, is_default)
+            if not (is_default and next_values[key] ~= nil) then next_values[key] = value end
+        end
+        function mod_setting_get_id(mod_id, setting) return mod_id .. "." .. setting.id end
+        function mod_setting_tooltip() end
+        mod_setting_group_x_offset = 0
+        labels = {}
+        function GuiButton(_, id, _, _, text)
+            table.insert(labels, text); local c = clicks[1]; clicks = {}; return c == "left", c == "right"
+        end
+    ''')
+    lua.execute((ROOT / "mod/settings.lua").read_text())
+    lua.execute('''
+        settings["noita_rl.course_slot_3"] = "lesson_01,lesson_02"
+        settings["noita_rl.course_slot_6"] = "lesson_09"
+        settings["noita_rl.room_lesson_01"] = "x"; settings["noita_rl.room_lesson_02"] = "x"
+        local course = mod_settings[2]
+        next_values["noita_rl.play_course"] = "1"
+        clicks = {"left"}; course.ui_fn("noita_rl", 1, true, 1, course)
+    ''')
+    assert lua.eval('next_values["noita_rl.play_course"]') == "3"
+    lua.execute('clicks = {"left"}; mod_settings[2].ui_fn("noita_rl", 1, true, 1, mod_settings[2])')
+    assert lua.eval('next_values["noita_rl.play_course"]') == "6"
+    lua.execute('mod_settings[2].ui_fn("noita_rl", 1, true, 1, mod_settings[2])')
+    label = lua.eval("labels[#labels]")
+    assert label.startswith("Course to play: 6  (1 rooms: lesson_09") and "1 missing" in label
+    lua.execute('clicks = {"right"}; mod_settings[2].ui_fn("noita_rl", 1, true, 1, mod_settings[2])')
+    assert lua.eval('next_values["noita_rl.play_course"]') == "3"
+    modes = [lua.eval(f"mod_settings[1].values[{i}][1]") for i in (1, 2, 3)]
+    assert modes == ["editor", "human", "agent"]
+
+
+def test_install_refuses_while_noita_runs_and_stale_files_are_listed(tmp_path, monkeypatch):
+    from noita_rl import cli
+
+    source, dest = tmp_path / "src", tmp_path / "dest"
+    (source / "files").mkdir(parents=True)
+    (source / "init.lua").write_text("new")
+    (source / "files" / "agent.lua").write_text("x")
+    dest.mkdir()
+    (dest / "init.lua").write_text("old")
+    assert cli.stale_mod_files(source, dest) == ["files/agent.lua", "init.lua"]
+    monkeypatch.setattr(cli, "noita_is_running", lambda: True)
+    args = argparse.Namespace(source=str(source), dest=str(dest), force=False)
+    assert cli.cmd_install_mod(args) == 1 and (dest / "init.lua").read_text() == "old"
+    monkeypatch.setattr(cli, "noita_is_running", lambda: False)
+    assert cli.cmd_install_mod(args) == 0 and cli.stale_mod_files(source, dest) == []
