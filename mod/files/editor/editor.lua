@@ -1,5 +1,6 @@
 dofile_once("mods/noita_rl/files/editor/model.lua")
 dofile_once("mods/noita_rl/files/scripts/loadout.lua")
+dofile_once("mods/noita_rl/files/agent/agent.lua")
 local M = EditorModel
 local ROOT = "mods/noita_rl/files/editor/"
 -- Exported rooms are stored as mod settings: noita_rl.export_<id> holds the scenario JSON
@@ -8,11 +9,24 @@ local ROOT = "mods/noita_rl/files/editor/"
 local EXPORT_PREFIX = "noita_rl.export_"
 local ROOM_PREFIX = "noita_rl.room_"
 local COURSE_KEY = "noita_rl.course"
+-- Saved courses: noita_rl.course_slot_<n>. "Course to play" in Mod settings (noita_rl.play_course)
+-- picks the slot that Human mode starts.
+local COURSE_SLOT_PREFIX = "noita_rl.course_slot_"
+local PLAY_COURSE_KEY = "noita_rl.play_course"
+local function chosen_slot()
+    local slot = tonumber(ModSettingGet(PLAY_COURSE_KEY))
+    if slot and slot >= 1 and slot <= M.course_slots then return math.floor(slot) end
+    return 1
+end
 local E = {
     room = M.decode(ModSettingGet("noita_rl.editor_draft")) or M.new(),
     editing = true, tool = "material", value = 2, slot = 1,
     undo = {}, redo = {}, stroke = false, anchor = nil, player = nil, spawned = {},
     library = {}, pick = 1, course = M.parse_course(ModSettingGet(COURSE_KEY)),
+    course_slot = chosen_slot(),
+    human = false, -- Mode "human" or "agent": play the chosen course only, no editor
+    agent = false, -- Mode "agent": Python drives; telemetry strip, overlay, numpad commands
+    episode = 0, cmd_seq = 0, overlay = ModSettingGet("noita_rl.agent_overlay") ~= false,
     run = nil, -- active play test or course: {rooms, ids, index, attempts, course, started}
     message = "Paint your room, place P (player), set the objective, then Play test.",
 }
@@ -175,7 +189,12 @@ local function start_room()
         if entity and entity ~= 0 then table.insert(E.spawned, {entity = entity, kind = kind}) end
     end
     run.attempts = run.attempts + 1
+    run.done = nil
+    E.episode = E.episode + 1
     E.play_frame = GameGetFrameNum()
+    -- Reward bookkeeping for agent episodes (same terms as the exported scenario rewards).
+    run.last_hp = 4 -- heal() below restores 4 HP
+    run.last_gold, run.kills, run.episode_return = 0, 0, 0
     -- Keep controls disabled until the GUI mouse click has been released.
     controls(false)
     heal(60)
@@ -203,18 +222,62 @@ local function play()
     start_run({E.room}, {E.room.name}, false)
 end
 
-local function play_course()
-    if #E.course == 0 then E.message = "The course is empty: pick an exported room and click Add."; return end
+-- Decode every room of a course; returns the rooms, or nil and the reason.
+local function course_rooms(ids)
+    if #ids == 0 then return nil, "The course is empty: pick an exported room and click Add." end
     local rooms = {}
-    for _, id in ipairs(E.course) do
+    for _, id in ipairs(ids) do
         local room = M.decode(ModSettingGet(ROOM_PREFIX .. id))
-        if not room then E.message = "Course room " .. id .. " is missing. Export it again."; return end
+        if not room then return nil, "Course room " .. id .. " is missing. Export it again." end
         local problem = M.problem(room)
-        if problem then E.message = "Course room " .. id .. ": " .. problem; return end
+        if problem then return nil, "Course room " .. id .. ": " .. problem end
         table.insert(rooms, room)
     end
+    return rooms
+end
+
+local function play_course()
+    local rooms, problem = course_rooms(E.course)
+    if not rooms then E.message = problem; return end
     persist()
     start_run(rooms, E.course, true)
+end
+
+-- Human mode: start the course chosen in Mod settings. If it can't be played, stay
+-- frozen in the editor room and show why (draw_human_error), never the canvas.
+local function start_human()
+    local slot = chosen_slot()
+    local ids = M.parse_course(ModSettingGet(COURSE_SLOT_PREFIX .. slot))
+    local rooms, problem = course_rooms(ids)
+    if not rooms then
+        enter_editor("Can't start course " .. slot .. ": " .. problem ..
+            " Set Mode to Room editor, build the course and click Save course in slot " .. slot .. ".")
+        return
+    end
+    start_run(rooms, ids, true)
+end
+
+local function restart_course(note)
+    local run = E.run
+    run.index, run.attempts, run.started, run.note = 1, 0, GameGetFrameNum(), note
+    start_room()
+end
+
+local function save_course_slot()
+    if #E.course == 0 then E.message = "The course is empty: nothing to save."; return end
+    local key = COURSE_SLOT_PREFIX .. E.course_slot
+    local replaced = ModSettingGet(key) and " (replaced the previous one)" or ""
+    ModSettingSet(key, M.course_text(E.course))
+    E.message = "Saved the course in course slot " .. E.course_slot .. replaced ..
+        ". Pick it under Mod settings > Course to play."
+end
+
+local function load_course_slot()
+    local ids = M.parse_course(ModSettingGet(COURSE_SLOT_PREFIX .. E.course_slot))
+    if #ids == 0 then E.message = "Course slot " .. E.course_slot .. " is empty."; return end
+    E.course = ids
+    ModSettingSet(COURSE_KEY, M.course_text(ids))
+    E.message = "Loaded course slot " .. E.course_slot .. " (" .. #ids .. " rooms)."
 end
 
 local function export()
@@ -242,24 +305,27 @@ local function room_result()
     local seconds = string.format("%.1f s", steps / 60)
     local damage = component("DamageModelComponent")
     local x, y = EntityGetTransform(E.player)
-    if damage and ComponentGetValue2(damage, "hp") <= 0.04 then return false, "died" end
-    if M.outside(ox, oy, x, y) then return false, "left the room" end
+    -- Third value: the terminal reason code reported to the agent (NoitaAgent.REASON).
+    if damage and ComponentGetValue2(damage, "hp") <= 0.04 then return false, "died", 2 end
+    if M.outside(ox, oy, x, y) then return false, "left the room", 3 end
     if objective == "reach_goal" then
-        if M.in_goal_world(room, ox, oy, x, y) then return true, "reached goal in " .. seconds end
+        if M.in_goal_world(room, ox, oy, x, y) then return true, "reached goal in " .. seconds, 1 end
     elseif objective == "kill_all" then
         local alive = 0
         for _, spawned in ipairs(E.spawned) do
             if M.entities[spawned.kind].enemy and EntityGetIsAlive(spawned.entity) then alive = alive + 1 end
         end
-        if alive == 0 then return true, "all enemies killed in " .. seconds end
+        if alive == 0 then return true, "all enemies killed in " .. seconds, 1 end
     elseif objective == "collect_gold" then
         local _, gold = M.counts(room)
         local wallet = component("WalletComponent")
-        if wallet and ComponentGetValue2(wallet, "money") >= gold then return true, "collected all gold in " .. seconds end
+        if wallet and ComponentGetValue2(wallet, "money") >= gold then
+            return true, "collected all gold in " .. seconds, 1
+        end
     end
     if steps >= M.max_steps(room) then
-        if objective == "survive" then return true, "survived " .. seconds end
-        return false, "timed out after " .. seconds
+        if objective == "survive" then return true, "survived " .. seconds, 1 end
+        return false, "timed out after " .. seconds, 4
     end
     return nil, M.time_limits[room.time] - math.floor(steps / 60)
 end
@@ -287,7 +353,9 @@ local function update_run(gui)
         start_room()
     else
         local total = string.format("%.1f s", (GameGetFrameNum() - run.started) / 60)
-        enter_editor("COURSE COMPLETE: " .. #run.rooms .. " rooms in " .. total .. ".")
+        local done = "COURSE COMPLETE: " .. #run.rooms .. " rooms in " .. total .. "."
+        if E.human then restart_course(done .. " Starting again from room 1.")
+        else enter_editor(done) end
     end
 end
 
@@ -307,7 +375,13 @@ local SETUP = {
     {"setup_position", function() teleport(E.room, 0, 0) end},
     {"setup_camera", function() GameSetCameraFree(true); GameSetCameraPos(128, 80) end},
     {"setup_library", function() recover_blueprints() end},
-    {"setup_editor", function() enter_editor() end},
+    {"setup_editor", function()
+        local mode = ModSettingGet("noita_rl.mode")
+        E.agent = mode == "agent"
+        E.human = mode == "human" or E.agent
+        if E.agent then E.input, E.control_state = NoitaAgent.new_input(), {} end
+        if E.human then start_human() else enter_editor() end
+    end},
 }
 
 function noita_editor_spawn(player)
@@ -332,6 +406,20 @@ function noita_editor_pre_update()
         controls(false)
         teleport(E.room, 0, 0)
         heal(120)
+    elseif E.agent then
+        -- The real keyboard and mouse never move the agent's player: its ControlsComponent
+        -- stays disabled and the mod writes the buttons from the action keys Python posts.
+        controls(false)
+        local control = component("ControlsComponent")
+        if not control then return end
+        if E.run and not E.run.done and GameGetFrameNum() > E.play_frame + 1 then
+            E.buttons, E.aim_x, E.aim_y = NoitaAgent.apply_controls(E.player, control, E.control_state)
+        else
+            NoitaAgent.release_controls(control, E.control_state) -- frozen while a result is shown
+            E.buttons, E.aim_x, E.aim_y = 0, 0, 0
+        end
+    elseif E.run and E.run.done then
+        controls(false)
     elseif not InputIsMouseButtonDown(1) and GameGetFrameNum() > E.play_frame + 1 then
         controls(true)
     end
@@ -355,7 +443,106 @@ local function draw_course(gui, y)
     if GuiButton(gui, 63, 252, y + 12, "Remove last") and #E.course > 0 then
         E.message = "Removed " .. table.remove(E.course) .. " from the course."; save_course()
     end
-    if GuiButton(gui, 64, 318, y + 12, "Play course") then play_course() end
+    if GuiButton(gui, 65, 318, y + 12, "Clear") and #E.course > 0 then
+        E.course = {}; save_course(); E.message = "Cleared the course. Load restores a saved one."
+    end
+    if GuiButton(gui, 64, 350, y + 12, "Play course") then play_course() end
+    -- Saved courses: Human mode and (later) the RL agent play the slot chosen in Mod settings.
+    local saved = M.parse_course(ModSettingGet(COURSE_SLOT_PREFIX .. E.course_slot))
+    if GuiButton(gui, 66, 6, y + 24, "Course slot " .. E.course_slot) then
+        E.course_slot = E.course_slot % M.course_slots + 1
+    end
+    if GuiButton(gui, 67, 80, y + 24, "Save course") then save_course_slot() end
+    if GuiButton(gui, 68, 140, y + 24, "Load course") then load_course_slot() end
+    GuiText(gui, 200, y + 24, #saved > 0 and ("Slot holds: " .. table.concat(saved, " > ")) or "Slot is empty")
+end
+
+local function draw_human_error(gui)
+    GuiText(gui, 6, 4, "NOITA ROOM EDITOR  |  " .. (E.agent and "RL agent" or "Human") .. " mode")
+    GuiText(gui, 6, 18, E.message)
+end
+
+local REASON_LABELS = {[0] = "", "success", "died", "left the room", "timed out"}
+
+local function held_names(mask)
+    local names = {}
+    for i, button in ipairs(NoitaAgent.BUTTONS) do
+        if math.floor(mask / 2 ^ (i - 1)) % 2 == 1 then table.insert(names, button.name) end
+    end
+    return #names > 0 and table.concat(names, "+") or "none"
+end
+
+-- This frame's reward, from the room's objective rewards (as in the exported scenario).
+local function agent_reward(run, room, success)
+    local rewards = M.rewards[M.objectives[room.objective].id]
+    local reward = rewards.per_step
+    local damage = component("DamageModelComponent")
+    local hp = damage and ComponentGetValue2(damage, "hp") or 0
+    if hp < run.last_hp - 0.0001 then reward = reward + rewards.damage_taken end
+    run.last_hp = hp
+    local wallet = component("WalletComponent")
+    local gold = wallet and ComponentGetValue2(wallet, "money") or 0
+    if gold > run.last_gold then reward = reward + rewards.pickup_gold * (gold - run.last_gold) end
+    run.last_gold = gold
+    local alive_now = 0
+    for _, spawned in ipairs(E.spawned) do
+        if M.entities[spawned.kind].enemy and EntityGetIsAlive(spawned.entity) then alive_now = alive_now + 1 end
+    end
+    local enemies = M.counts(room)
+    local kills = enemies - alive_now
+    if kills > run.kills then reward = reward + rewards.enemy_kill * (kills - run.kills) end
+    run.kills = kills
+    if success then reward = reward + rewards.goal_reached end
+    return reward
+end
+
+-- One agent frame: commands, scoring, sensors, strip and overlay. A finished episode is
+-- held for HOLD_FRAMES (so Python sees it), then continues on its own: the next room after
+-- a success, the same room after a failure. Python can restart any room at any time.
+local function update_agent(gui)
+    local A, run = NoitaAgent, E.run
+    local command = A.read_commands(E.input)
+    if E.input.toggle_overlay then E.input.toggle_overlay = nil; E.overlay = not E.overlay end
+    if command then
+        E.cmd_seq = E.cmd_seq + 1
+        if command.room and command.room >= 1 and command.room <= #run.rooms then
+            run.index = command.room
+            run.attempts = 0
+        end
+        start_room()
+    end
+    local room = run.rooms[run.index]
+    local now = GameGetFrameNum()
+    local reward = 0
+    if not run.done then
+        local success, _, reason = room_result()
+        reward = agent_reward(run, room, success == true)
+        run.episode_return = run.episode_return + reward
+        if success ~= nil then run.done = {reason = reason, frame = now, steps = now - E.play_frame} end
+    elseif now - run.done.frame >= A.HOLD_FRAMES then
+        if run.done.reason == A.REASON.success then
+            run.index, run.attempts = run.index % #run.rooms + 1, 0
+        end
+        start_room()
+        room, run.done = run.rooms[run.index], nil
+    end
+
+    local ox, oy = M.room_origin(run.index)
+    local s = A.sense({player = E.player, room = room, ox = ox, oy = oy, spawned = E.spawned, model = M})
+    s.frame, s.episode, s.cmd_seq = now, E.episode, E.cmd_seq
+    s.room_index, s.room_count, s.attempt, s.objective = run.index, #run.rooms, run.attempts, room.objective
+    s.terminal, s.reason = run.done ~= nil, run.done and run.done.reason or 0
+    s.steps = run.done and run.done.steps or (now - E.play_frame)
+    s.max_steps = M.max_steps(room)
+    s.reward, s.episode_return, s.overlay = reward, run.episode_return, E.overlay
+    s.buttons, s.aim_x, s.aim_y = E.buttons or 0, E.aim_x or 0, E.aim_y or 0
+    local top = A.draw_strip(gui, A.pack(s))
+    if E.overlay then
+        local wx, wy = EntityGetTransform(E.player)
+        A.draw_overlay(gui, s, wx, wy, top, {room = run.ids[run.index],
+            objective = M.objectives[room.objective].label, reason = REASON_LABELS[s.reason],
+            buttons = held_names(s.buttons)})
+    end
 end
 
 local function draw_editor(gui)
@@ -440,7 +627,7 @@ local function draw_editor(gui)
     if GuiButton(gui, 52, 372, 218, "<") then E.room.name = M.step_name(E.room.name, -1); persist() end
     if GuiButton(gui, 53, 384, 218, ">") then E.room.name = M.step_name(E.room.name, 1); persist() end
     draw_course(gui, 232)
-    GuiText(gui, 6, 260, E.message)
+    GuiText(gui, 6, 272, E.message)
     trace("draw_done")
 end
 
@@ -451,17 +638,21 @@ function noita_editor_update()
     GuiStartFrame(E.gui)
     if E.editing then
         GuiBeginAutoBox(E.gui)
-        draw_editor(E.gui)
+        if E.human then draw_human_error(E.gui) else draw_editor(E.gui) end
         GuiEndAutoBoxNinePiece(E.gui, 4)
         if traced["first_frame_done"] then trace("second_frame_done") end
         trace("first_frame_done")
         return
     end
-    if GuiButton(E.gui, 10, 6, 6, "Return to editor") then enter_editor(); return end
+    if E.agent then update_agent(E.gui); return end
+    if E.human then
+        if GuiButton(E.gui, 10, 6, 6, "Restart course") then restart_course("Restarted the course."); return end
+    elseif GuiButton(E.gui, 10, 6, 6, "Return to editor") then enter_editor(); return end
     if E.run.course and GuiButton(E.gui, 11, 100, 6, "Skip room") then
         if E.run.index < #E.run.rooms then
             E.run.index, E.run.attempts, E.run.note = E.run.index + 1, 0, "Skipped to the next room."
             start_room()
+        elseif E.human then restart_course("Skipped the last room. Starting again from room 1.")
         else enter_editor("Course ended (skipped the last room).") end
         return
     end

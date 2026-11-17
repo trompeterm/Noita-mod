@@ -109,7 +109,24 @@ To build one, use the **COURSE** row at the bottom of the editor:
    **Remove last** removes the last room. The same room can appear more than once.
 3. Click **Play course**.
 
-The course is saved as the `noita_rl.course` mod setting. Each room's editable layout is
+**Clear** empties the course. To keep a course, use the row under it: **Course slot N**
+selects one of 9 slots, **Save course** stores the current course there and **Load course**
+brings it back for editing. The text next to the buttons shows what the slot holds.
+
+### Playing a saved course (Human mode)
+
+In **Mods > Noita Room Editor > Mod settings**:
+
+- **Mode**: *Room editor*, *Human* (play a course without the editor) or *RL agent*.
+- **Course to play**: click to step through saved course slots (right-click goes back).
+  It shows each course's rooms and warns if a room's export is missing.
+
+Both apply when you start a new game. In Human mode the course starts immediately;
+finishing it starts it again from room 1, and **Restart course** and **Skip room** are always
+available. Switch **Mode** back to **Room editor** to edit.
+
+The course being edited is saved as the `noita_rl.course` mod setting, and saved
+courses as `noita_rl.course_slot_<n>`. Each room's editable layout is
 saved as `noita_rl.room_<id>`, next to its scenario export. Rooms exported before
 courses existed are recovered automatically, if the draft or a save slot still matches
 the export exactly. Otherwise, load the room and export it again.
@@ -136,15 +153,77 @@ the export exactly. Otherwise, load the room and export it again.
 3. Reference the ids from a curriculum such as `examples/curricula/starter.json`.
    Order lessons from easy to hard: walk to a goal, then jump a lava pit, then kill
    one zombie, and so on.
-4. To run a room for the agent, open **Mods > Noita Room Editor > Mod settings**,
-   set **Mode** to **RL agent**, and start a new game. The mod then loads the active
-   compiled scenario (`noita-rl compile --activate`) and emits telemetry. It uses
-   the same empty world as the editor, so vanilla terrain, vegetation and biome
-   enemies can't interfere. Switch **Mode** back to **Room editor** to edit.
+4. To let the agent play, see **RL agent mode** below.
 
 Exported rooms use origin (0, 0), seed 1337, a 4 HP player with a starter wand, and
 default rewards for each objective. To tune rewards or the loadout for a lesson, edit
 the pulled JSON in `examples/scenarios/`.
+
+## RL agent mode
+
+Set **Mode** to **RL agent** and **Course to play** to a saved course, then start a new game.
+The course is laid out exactly as in Human mode, but an *episode* is one attempt at one
+room, and Python drives the player with simulated key presses. Noita stays open for the
+whole training session: rooms are reset in game, not by restarting Noita.
+
+- **Episodes.** A room ends with success, death, leaving the room, or timeout, scored the same
+  way as a play test. The result is held on screen for 30 frames with the player frozen. Then
+  the next room starts after a success, or the same room after a failure.
+- **Commands from Python** are numpad keys: `N` then **Enter** starts an episode in course
+  room N, **Enter** or **.** restarts the current room, and **\*** toggles the overlay. You can
+  press them yourself to test.
+- **Telemetry strip.** The mod is sandboxed, so it can't write files or open sockets. Every
+  frame it draws its state as a small strip of colored cells in the top-left corner
+  (3 bytes per cell, with a checksum), and Python screenshots and decodes it
+  (`src/noita_rl/telemetry/agent_packet.py`). The strip holds:
+  - frame, episode, room number and count, attempt, objective, done flag and reason
+  - steps and limit, this frame's reward and the episode return
+  - position in the room, velocity, on-ground flag, HP, gold, wand mana
+  - goal offset, distance and in-goal flag
+  - the nearest 8 enemies (offset, HP) and 4 gold pickups
+  - 16 raycasts for terrain distance, plus 16 that also stop at liquids
+- **Rewards** use the objective's defaults (the same values written to the exported scenario):
+  a per-step cost, damage, gold, kills, and a bonus on success.
+- **Overlay** (Mod settings **Agent overlay**, or numpad \*): ray hits (yellow terrain,
+  blue liquid), goal (green), enemies (red), gold, and a sensor readout under the strip.
+  The strip is always drawn.
+
+- **Controls.** The real keyboard and mouse never move the agent's player. Python posts
+  action keys to Noita's window only, so they work in the background and never type into
+  other apps: **A/D/W/S** to move, **W** or **Space** to jump or levitate, **J** to fire, **K** to kick,
+  **E** to interact, and the **arrow keys** to aim in 8 directions (with no arrow held, the
+  agent aims the way it last moved). The mod writes these into the player's ControlsComponent,
+  and reports in the strip which keys it saw and where it aimed.
+
+### Training in the background
+
+Noita has to keep running and drawing while you use other apps:
+
+```powershell
+uv run noita-rl configure-noita         # with Noita closed: windowed, no pause when unfocused
+uv run noita-rl configure-noita --undo  # restore your original config.xml
+```
+
+Don't minimize Noita: a minimized window draws nothing. Leave it behind your other
+windows. Python reads Noita's own window contents (`PrintWindow`), so covered is fine.
+
+To check the connection with Noita in the background:
+
+```powershell
+uv run noita-rl agent-probe                    # decode one frame
+uv run noita-rl agent-probe --seconds 5        # keep printing; also reports frames per second
+uv run noita-rl agent-probe --hold right,jump --seconds 2  # check the mod receives keys
+uv run noita-rl agent-probe --room 2           # send "2 Enter": start course room 2
+uv run noita-rl agent-probe --save shot.png    # keep the capture if decoding fails
+uv run noita-rl agent-probe --focus            # old method: bring Noita to the front
+```
+
+The game runs in real time and doesn't wait for Python. Each reading carries the frame
+number, so Python knows how many frames passed between two looks. If the PC is busy, an
+action simply lasts a few frames longer.
+
+The Gym environment (`src/noita_rl/env.py`) still uses the older one-scenario path. Moving it
+to this protocol is the next step.
 
 ## Scope and limitations
 
@@ -161,7 +240,9 @@ player behavior may interfere.
 - `mod/settings.lua`: the **Mode** setting.
 - `mod/files/editor/model.lua`: blueprint operations, validated save format (`NRE2`,
   still reads `NRE1`), task validation and scenario JSON export.
-- `mod/files/editor/editor.lua`: GUI, persistence, controls, scored play tests and export.
+- `mod/files/editor/editor.lua`: GUI, persistence, controls, scored play tests, export, courses,
+  Human and RL agent modes.
+- `mod/files/agent/agent.lua`: agent sensors, telemetry strip, overlay and numpad commands.
 - `mod/files/editor/biome_map.lua`, `biomes.xml`, `empty.xml`: isolated empty world.
 - `mod/files/editor/terrain/`: native Noita material-color tile scenes.
 - `mod/files/editor/ui/`: canvas swatches.
